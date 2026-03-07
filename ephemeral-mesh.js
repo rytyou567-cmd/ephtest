@@ -260,73 +260,43 @@ function handleP2PConnection(conn) {
 }
 
 function handleIncomingData(data, conn) {
-    console.log(`DATA_IN :: ${conn.peer} (${typeof data})`, data);
-    let msg = data;
 
-    // Convert ArrayBuffer/Uint8Array to string if needed
-    if (data instanceof ArrayBuffer || data instanceof Uint8Array || (data && data.buffer instanceof ArrayBuffer)) {
-        try {
-            msg = new TextDecoder().decode(data);
-            console.log('DECODED_BINARY_TO_STRING', msg);
-        } catch (e) {
-            console.error('FAILED_TO_DECODE_BINARY', e);
-        }
-    }
 
-    if (typeof msg === 'string') {
-        try {
-            msg = JSON.parse(msg);
-            console.log('PARSED_JSON_MSG', msg);
-        } catch (e) {
-            console.error('FAILED_TO_PARSE_JSON', msg);
-            return;
-        }
-    }
-
-    if (!msg || !msg.type) {
-        console.warn('RECEIVED_INVALID_MSG_FORMAT', msg);
-        return;
-    }
-
-    log(`MSG_IN :: ${msg.type} from ${conn.peer}`);
-
-    switch (msg.type) {
+    switch (data.type) {
         case 'KEY_EXCHANGE':
-            console.log('PROBING :: KEY_EXCHANGE_START');
-            handleKeyExchange(msg, conn);
+            handleKeyExchange(data, conn);
             break;
         case 'KEY_READY':
-            console.log('PROBING :: KEY_READY_START');
-            handleKeyReady(msg, conn);
+            handleKeyReady(data, conn);
             break;
         case 'FILE_OFFER':
         case 'FILE_OFFER_ENCRYPTED':
-            handleFileOffer(msg, conn);
+            handleFileOffer(data, conn);
             break;
         case 'FILE_ACCEPT':
-            startFileStream(msg.transferId, conn);
+            startFileStream(data.transferId, conn);
             break;
         case 'FILE_REJECT':
-            log(`REJECTED :: ${msg.transferId}`);
-            updateTransferStatus(msg.transferId, 'REJECTED', '#f33');
+            log(`REJECTED :: ${data.transferId}`);
+            updateTransferStatus(data.transferId, 'REJECTED', '#f33');
             break;
         case 'FILE_CANCEL':
-            log(`CANCELLED :: ${msg.transferId}`);
-            updateTransferStatus(msg.transferId, 'CANCELLED', '#666');
-            if (incomingFiles[msg.transferId]) delete incomingFiles[msg.transferId];
+            log(`CANCELLED :: ${data.transferId}`);
+            updateTransferStatus(data.transferId, 'CANCELLED', '#666');
+            if (incomingFiles[data.transferId]) delete incomingFiles[data.transferId];
 
             // Remove from queue if it's there
-            const idx = pendingOffers.findIndex(o => o.meta.transferId === msg.transferId);
+            const idx = pendingOffers.findIndex(o => o.meta.transferId === data.transferId);
             if (idx !== -1) pendingOffers.splice(idx, 1);
 
             updateAcceptModal();
             break;
         case 'FILE_CHUNK':
         case 'FILE_CHUNK_ENCRYPTED':
-            handleFileChunk(msg, conn);
+            handleFileChunk(data, conn);
             break;
         case 'FILE_CHUNK_ACK':
-            handleFileChunkAck(msg);
+            handleFileChunkAck(data);
             break;
         case 'UNENCRYPTED_MODE_NOTIFICATION':
             // Remote peer notified us they're in unencrypted mode
@@ -343,7 +313,7 @@ function updateUI() {
     // Show/hide help text based on peer count
     const peerHelpText = document.getElementById('peer-help-text');
     const hasPeers = Object.keys(connectedPeers).length > 0;
-
+    
     if (peerHelpText) {
         peerHelpText.style.display = hasPeers ? 'none' : 'block';
     }
@@ -711,13 +681,13 @@ async function handleKeyExchange(data, conn) {
 
         log(`✓ KEY_BINDING_VERIFIED :: ${peerId}`);
 
+        // === CONTINUE WITH KEY EXCHANGE ===
+
         // Import peer's public key
-        console.log('PROBING :: IMPORTING_PUBLIC_KEY');
         const peerPublicKey = await CryptoUtils.importPublicKey(data.publicKey);
         peerPublicKeys[peerId] = peerPublicKey;
 
         // Derive shared encryption key using ECDH
-        console.log('PROBING :: DERIVING_SHARED_KEY');
         const sharedKey = await CryptoUtils.deriveEncryptionKey(
             myKeyPair.privateKey,
             peerPublicKey
@@ -727,29 +697,26 @@ async function handleKeyExchange(data, conn) {
         // Send KEY_EXCHANGE back if we haven't already
         if (!keyExchangeStatus[peerId] || keyExchangeStatus[peerId] === 'pending') {
             const timestamp = Date.now();
-            console.log('PROBING :: PREPARING_RESPONSE_BINDING');
             const binding = await CryptoUtils.createKeyBinding(myId, myPublicKeyData, timestamp);
 
-            console.log('PROBING :: SENDING_RESPONSE_KEY_EXCHANGE');
-            safeSend(conn, JSON.stringify({
+            safeSend(conn, {
                 type: 'KEY_EXCHANGE',
                 publicKey: myPublicKeyData,
                 fingerprint: myFingerprint,
                 peerId: myId,
                 timestamp: timestamp,
                 binding: binding
-            }));
+            });
         }
 
         // Mark as ready
         keyExchangeStatus[peerId] = 'ready';
 
         // Confirm key exchange complete
-        console.log('PROBING :: SENDING_KEY_READY');
-        safeSend(conn, JSON.stringify({
+        conn.send({
             type: 'KEY_READY',
             peerId: myId
-        }));
+        });
 
         updateUI();
         log(`ENCRYPTION_READY :: ${peerId}`);
@@ -1383,6 +1350,5 @@ document.getElementById('btn-copy-id').onclick = () => {
         setTimeout(() => btn.innerText = 'COPY', 2000);
     });
 };
-
 
 
