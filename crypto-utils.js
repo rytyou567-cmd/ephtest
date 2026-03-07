@@ -12,6 +12,22 @@
 
 const CryptoUtils = {
     /**
+     * Normalize publicKeyData from any JSON-transport format to a native ArrayBuffer.
+     * Browser clients always send a real ArrayBuffer (passthrough, no cost).
+     * Non-browser clients (e.g. Flutter via peerdart JSON) send a plain Array of numbers;
+     * this converts it to an identical ArrayBuffer so SubtleCrypto accepts it.
+     * No string/hex interpretation is performed, keeping the attack surface minimal.
+     * @param {ArrayBuffer|TypedArray|Array<number>} data
+     * @returns {ArrayBuffer}
+     */
+    coerceToArrayBuffer(data) {
+        if (data instanceof ArrayBuffer) return data;          // native ArrayBuffer — passthrough
+        if (ArrayBuffer.isView(data)) return data.buffer;     // TypedArray/DataView — passthrough
+        if (Array.isArray(data)) return new Uint8Array(data).buffer; // JSON Array from Dart
+        return data; // unknown — let SubtleCrypto reject it with a clear error
+    },
+
+    /**
      * Generate an ECC key pair (P-256 curve)
      * @returns {Promise<CryptoKeyPair>} {publicKey, privateKey}
      */
@@ -54,19 +70,10 @@ const CryptoUtils = {
      */
     async importPublicKey(keyData) {
         try {
-            // Handle base64 string if received from Dart/other platform
-            if (typeof keyData === 'string') {
-                const binaryString = atob(keyData);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                keyData = bytes.buffer;
-            }
-
+            const buffer = this.coerceToArrayBuffer(keyData);
             const publicKey = await crypto.subtle.importKey(
                 'raw',
-                keyData,
+                buffer,
                 {
                     name: 'ECDH',
                     namedCurve: 'P-256'
@@ -174,7 +181,8 @@ const CryptoUtils = {
      */
     async generateFingerprint(publicKeyData) {
         try {
-            const hashBuffer = await crypto.subtle.digest('SHA-256', publicKeyData);
+            const buffer = this.coerceToArrayBuffer(publicKeyData);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
             return this.arrayBufferToHex(hashBuffer);
         } catch (error) {
             console.error('Fingerprint generation failed:', error);
@@ -226,27 +234,18 @@ const CryptoUtils = {
      */
     async createKeyBinding(peerId, publicKeyData, timestamp) {
         try {
-            // Handle base64 string if received from Dart/other platform
-            if (typeof publicKeyData === 'string') {
-                const binaryString = atob(publicKeyData);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                publicKeyData = bytes;
-            }
-
+            const buffer = this.coerceToArrayBuffer(publicKeyData);
             const encoder = new TextEncoder();
             const peerIdBytes = encoder.encode(peerId);
             const timestampBytes = encoder.encode(timestamp.toString());
 
             // Concatenate: peerID || publicKey || timestamp
             const combined = new Uint8Array(
-                peerIdBytes.length + (publicKeyData.byteLength || publicKeyData.length) + timestampBytes.length
+                peerIdBytes.length + buffer.byteLength + timestampBytes.length
             );
             combined.set(peerIdBytes, 0);
-            combined.set(new Uint8Array(publicKeyData), peerIdBytes.length);
-            combined.set(timestampBytes, peerIdBytes.length + (publicKeyData.byteLength || publicKeyData.length));
+            combined.set(new Uint8Array(buffer), peerIdBytes.length);
+            combined.set(timestampBytes, peerIdBytes.length + buffer.byteLength);
 
             const hash = await crypto.subtle.digest('SHA-256', combined);
             return this.arrayBufferToHex(hash);
