@@ -262,12 +262,23 @@ function handleP2PConnection(conn) {
 function handleIncomingData(data, conn) {
     console.log(`DATA_IN :: ${conn.peer} (${typeof data})`, data);
     let msg = data;
-    if (typeof data === 'string') {
+
+    // Convert ArrayBuffer/Uint8Array to string if needed
+    if (data instanceof ArrayBuffer || data instanceof Uint8Array || (data && data.buffer instanceof ArrayBuffer)) {
         try {
-            msg = JSON.parse(data);
-            console.log('PARSED_JSON_STRING', msg);
+            msg = new TextDecoder().decode(data);
+            console.log('DECODED_BINARY_TO_STRING', msg);
         } catch (e) {
-            console.error('FAILED_TO_PARSE_DATA', data);
+            console.error('FAILED_TO_DECODE_BINARY', e);
+        }
+    }
+
+    if (typeof msg === 'string') {
+        try {
+            msg = JSON.parse(msg);
+            console.log('PARSED_JSON_MSG', msg);
+        } catch (e) {
+            console.error('FAILED_TO_PARSE_JSON', msg);
             return;
         }
     }
