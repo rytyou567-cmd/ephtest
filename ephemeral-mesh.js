@@ -69,6 +69,20 @@ function log(msg) {
 }
 
 /**
+ * Robust helper to convert ArrayBuffer or Uint8Array to Base64 string.
+ * This ensures binary data survives transport layers that might strip it.
+ */
+function bufferToBase64(buffer) {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+}
+
+/**
  * Track bytes transferred for real-time speed calculation
  */
 function trackUpload(bytes) {
@@ -595,10 +609,10 @@ async function initiateKeyExchange(conn) {
         const binding = await CryptoUtils.createKeyBinding(myId, myPublicKeyData, timestamp);
 
         // Send our public key with cryptographic binding (MITM protection)
-        // Convert ArrayBuffer to plain Array for reliable serialization to Flutter
+        // Convert binary to Base64 to bypass transport stripping
         safeSend(conn, {
             type: 'KEY_EXCHANGE',
-            publicKey: Array.from(new Uint8Array(myPublicKeyData)),
+            publicKey: bufferToBase64(myPublicKeyData),
             fingerprint: myFingerprint,
             peerId: myId,
             timestamp: timestamp,
@@ -704,7 +718,7 @@ async function handleKeyExchange(data, conn) {
 
             safeSend(conn, {
                 type: 'KEY_EXCHANGE',
-                publicKey: Array.from(new Uint8Array(myPublicKeyData)),
+                publicKey: bufferToBase64(myPublicKeyData),
                 fingerprint: myFingerprint,
                 peerId: myId,
                 timestamp: timestamp,
@@ -1069,15 +1083,15 @@ async function startFileStream(id, conn) {
         if (hasEncryption) {
             try {
                 const { encryptedData, iv } = await CryptoUtils.encryptChunk(chunk, sharedKeys[conn.peer]);
-                // Always stringify before sending to PeerDart
-                conn.send(JSON.stringify({
+                // Encode binary fields as Base64 for definitive transport safety
+                safeSend(conn, {
                     type: 'FILE_CHUNK_ENCRYPTED',
                     transferId: id,
                     index: i,
                     total: totalChunks,
-                    chunk: Array.from(new Uint8Array(encryptedData)),
-                    iv: Array.from(iv)
-                }));
+                    chunk: bufferToBase64(encryptedData),
+                    iv: bufferToBase64(iv)
+                });
 
                 // Track upload metrics for encrypted transfers
                 trackUpload(encryptedData.byteLength);
@@ -1093,7 +1107,7 @@ async function startFileStream(id, conn) {
                 transferId: id,
                 index: i,
                 total: totalChunks,
-                chunk: Array.from(new Uint8Array(chunk))
+                chunk: bufferToBase64(chunk)
             });
 
             if (i === 0) log(`FIRST_CHUNK_SENT :: ${id} to ${conn.peer}`);
