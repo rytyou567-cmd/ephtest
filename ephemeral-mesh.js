@@ -188,7 +188,9 @@ peer.on('open', async (id) => {
 // Helper for safe sending (catches binarypack errors)
 function safeSend(conn, data) {
     try {
-        conn.send(data);
+        // Always stringify to bypass binarypack issues with PeerDart
+        conn.send(JSON.stringify(data));
+        log(`SENT_DATA :: ${data.type} to ${conn.peer}`);
     } catch (e) {
         console.error(`SEND_FAILED :: ${data.type} to ${conn.peer}`, e);
         log(`SEND_ERROR :: ${data.type} - ${e.message}`);
@@ -714,7 +716,7 @@ async function handleKeyExchange(data, conn) {
         keyExchangeStatus[peerId] = 'ready';
 
         // Confirm key exchange complete
-        conn.send({
+        safeSend(conn, {
             type: 'KEY_READY',
             peerId: myId
         });
@@ -873,7 +875,7 @@ window.cancelTransfer = (id) => {
 
         // Only notify the specific peer associated with this unique ID
         if (pId && connectedPeers[pId]) {
-            connectedPeers[pId].send({ type: 'FILE_CANCEL', transferId: id });
+            safeSend(connectedPeers[pId], { type: 'FILE_CANCEL', transferId: id });
         }
 
         updateTransferStatus(id, 'CANCELLED', '#666');
@@ -957,12 +959,12 @@ elBtnAcceptAll.onclick = () => {
 
 elBtnReject.onclick = () => {
     const offer = pendingOffers.shift();
-    offer.conn.send({ type: 'FILE_REJECT', transferId: offer.meta.transferId });
+    safeSend(offer.conn, { type: 'FILE_REJECT', transferId: offer.meta.transferId });
     updateAcceptModal();
 };
 
 function acceptOffer(offer) {
-    offer.conn.send({ type: 'FILE_ACCEPT', transferId: offer.meta.transferId });
+    safeSend(offer.conn, { type: 'FILE_ACCEPT', transferId: offer.meta.transferId });
     createTransferUI(offer.meta.transferId, offer.meta.fileName, 'RECEIVING');
 }
 
@@ -1015,7 +1017,7 @@ async function acceptOfferWithStreaming(offer) {
         };
 
         // Send acceptance
-        conn.send({ type: 'FILE_ACCEPT', transferId: meta.transferId });
+        safeSend(conn, { type: 'FILE_ACCEPT', transferId: meta.transferId });
         createTransferUI(meta.transferId, meta.fileName, '⚡ STREAMING TO DISK');
         log(`DIRECT_DOWNLOAD_STARTED :: ${meta.fileName} [${(meta.fileSize / (1024 * 1024)).toFixed(2)} MB]`);
 
@@ -1067,14 +1069,15 @@ async function startFileStream(id, conn) {
         if (hasEncryption) {
             try {
                 const { encryptedData, iv } = await CryptoUtils.encryptChunk(chunk, sharedKeys[conn.peer]);
-                conn.send({
+                // Always stringify before sending to PeerDart
+                conn.send(JSON.stringify({
                     type: 'FILE_CHUNK_ENCRYPTED',
                     transferId: id,
                     index: i,
                     total: totalChunks,
                     chunk: Array.from(new Uint8Array(encryptedData)),
                     iv: Array.from(iv)
-                });
+                }));
 
                 // Track upload metrics for encrypted transfers
                 trackUpload(encryptedData.byteLength);
