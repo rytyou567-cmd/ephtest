@@ -313,7 +313,7 @@ function updateUI() {
     // Show/hide help text based on peer count
     const peerHelpText = document.getElementById('peer-help-text');
     const hasPeers = Object.keys(connectedPeers).length > 0;
-    
+
     if (peerHelpText) {
         peerHelpText.style.display = hasPeers ? 'none' : 'block';
     }
@@ -593,9 +593,10 @@ async function initiateKeyExchange(conn) {
         const binding = await CryptoUtils.createKeyBinding(myId, myPublicKeyData, timestamp);
 
         // Send our public key with cryptographic binding (MITM protection)
+        // Convert ArrayBuffer to plain Array for reliable serialization to Flutter
         safeSend(conn, {
             type: 'KEY_EXCHANGE',
-            publicKey: myPublicKeyData,
+            publicKey: Array.from(new Uint8Array(myPublicKeyData)),
             fingerprint: myFingerprint,
             peerId: myId,
             timestamp: timestamp,
@@ -701,7 +702,7 @@ async function handleKeyExchange(data, conn) {
 
             safeSend(conn, {
                 type: 'KEY_EXCHANGE',
-                publicKey: myPublicKeyData,
+                publicKey: Array.from(new Uint8Array(myPublicKeyData)),
                 fingerprint: myFingerprint,
                 peerId: myId,
                 timestamp: timestamp,
@@ -1071,8 +1072,8 @@ async function startFileStream(id, conn) {
                     transferId: id,
                     index: i,
                     total: totalChunks,
-                    chunk: encryptedData,
-                    iv: iv
+                    chunk: Array.from(new Uint8Array(encryptedData)),
+                    iv: Array.from(iv)
                 });
 
                 // Track upload metrics for encrypted transfers
@@ -1089,7 +1090,7 @@ async function startFileStream(id, conn) {
                 transferId: id,
                 index: i,
                 total: totalChunks,
-                chunk: chunk
+                chunk: Array.from(new Uint8Array(chunk))
             });
 
             if (i === 0) log(`FIRST_CHUNK_SENT :: ${id} to ${conn.peer}`);
@@ -1350,5 +1351,7 @@ document.getElementById('btn-copy-id').onclick = () => {
         setTimeout(() => btn.innerText = 'COPY', 2000);
     });
 };
+
+
 
 
